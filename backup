@@ -25,13 +25,14 @@ if ! mkdir "${lockdir}" &> /dev/null; then
   exit 1
 fi
 
+# always remove the lock directory we just created on exit, no matter what.
+# however, this is set after the lock to ensure that we don't spurriously remove
+# another process's lock!
+trap "rm -rf ${lockdir}" INT QUIT TERM EXIT
+
 # store useful info about this backup in the the lock directory
 echo "$BASHPID" > "${pid_file}"
 echo "$(date)" > "${start_date_file}"
-
-# always remove the lock directory we're about to create on exit, no matter
-# what. however, make sure we only do this once we know we have the lock!
-trap "rm -rf ${lockdir}" INT QUIT TERM EXIT
 
 echo "Backing up '${SOURCE}' to '${DEST}'..."
 echo
