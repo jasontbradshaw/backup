@@ -20,17 +20,20 @@ start_date_file="${lockdir}/start-date"
 if [[ "${1}" == "-s" ]] || [[ "${1}" == "--status" ]]; then
   if [ -e "${lockdir}" ]; then
     # if the user supplied a custom string, print it
-    custom_message="${2}"
-    if [ ! -z "${custom_message}" ]; then
-      echo "${custom_message}"
+    custom_active_message="${2}"
+    if [ ! -z "${custom_active_message}" ]; then
+      echo "${custom_active_message}"
     fi
-
-    # exit with success indicating that a backup is happening
-    exit 0
   else
-    # notify that there's no backup in progress, but print no message
-    exit 1
+    # notify that there's no backup in progress, printing any custom message
+    custom_inactive_message="${3}"
+    if [ ! -z "${custom_inactive_message}" ]; then
+      echo "${custom_inactive_message}"
+    fi
   fi
+
+  # always exit with success
+  exit 0
 fi
 
 # exit if we can't grab our lock
