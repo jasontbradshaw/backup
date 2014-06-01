@@ -18,6 +18,7 @@ ${RDIFF} \
   --exclude '/home/*/.cache' \
   --include '/home' \
   --exclude '/tmp/*' \
+  --exclude '/var/tmp/*' \
   --exclude '/proc/*' \
   --exclude '/sys/*' \
   --exclude '/mnt/*/*' \
