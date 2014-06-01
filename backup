@@ -58,6 +58,3 @@ ${RDIFF} \
   --force \
   --verbosity "${VERBOSITY}" \
   "${DEST}"
-
-echo
-echo 'Backup complete!'
