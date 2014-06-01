@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-
-# print the current status of the system backup
-lockdir='/tmp/backup.lock'
-if [ -e "${lockdir}" ]; then
-  echo "| backup in progress... "
-fi

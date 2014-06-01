@@ -16,6 +16,23 @@ lockdir="/tmp/backup.lock"
 pid_file="${lockdir}/pid"
 start_date_file="${lockdir}/start-date"
 
+# if the user requested the status of the backup, print the status and exit
+if [[ "${1}" == "-s" ]] || [[ "${1}" == "--status" ]]; then
+  if [ -e "${lockdir}" ]; then
+    # if the user supplied a custom string, print it
+    custom_message="${2}"
+    if [ ! -z "${custom_message}" ]; then
+      echo "${custom_message}"
+    fi
+
+    # exit with success indicating that a backup is happening
+    exit 0
+  else
+    # notify that there's no backup in progress, but print no message
+    exit 1
+  fi
+fi
+
 # exit if we can't grab our lock
 if ! mkdir "${lockdir}" &> /dev/null; then
   echo "Backup already in progress:"
