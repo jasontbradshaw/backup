@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
-RDIFF=rdiff-backup
 
 # our only argument is the destination
 DEST="${1}"
 
 # configuration options
 SOURCE='/'
-VERBOSITY=5
-KEEP_FOR=3M
+MAX_AGE_DAYS=365
 
-# the file used to notify that a system backup is happening
-lockdir="/tmp/backup.lock"
-
-# information files for the current backup process
-pid_file="${lockdir}/pid"
-start_date_file="${lockdir}/start-date"
+# the directory used to notify that a system backup is happening
+lock_dir="/tmp/backup.lock"
+info_file="${lock_dir}/info"
 
 # if the user requested the status of the backup, print the status and exit
 if [[ "${1}" == "-s" ]] || [[ "${1}" == "--status" ]]; then
-  if [ -e "${lockdir}" ]; then
+  if [ -e "${lock_dir}" ]; then
     # if the user supplied a custom string, print it
     custom_active_message="${2}"
     if [ ! -z "${custom_active_message}" ]; then
@@ -36,11 +31,16 @@ if [[ "${1}" == "-s" ]] || [[ "${1}" == "--status" ]]; then
   exit 0
 fi
 
+# exit if we're not running as root, since we'll need it to run the backup
+if [[ ${EUID} -ne 0 ]]; then
+  echo 'This script needs root privileges to run!'
+  exit 1
+fi
+
 # exit if we can't grab our lock
-if ! mkdir "${lockdir}" &> /dev/null; then
+if ! mkdir "${lock_dir}" &> /dev/null; then
   echo "Backup already in progress:"
-  echo "  Started: $(cat ${start_date_file})"
-  echo "      PID: $(cat ${pid_file})"
+  echo "$(cat ${info_file})"
   echo "Exiting."
   exit 1
 fi
@@ -48,16 +48,45 @@ fi
 # always remove the lock directory we just created on exit, no matter what.
 # however, this is set after the lock to ensure that we don't spurriously remove
 # another process's lock!
-trap "rm -rf ${lockdir}" INT QUIT TERM EXIT
+trap "rm -rf ${lock_dir}" INT QUIT TERM EXIT
 
-# store useful info about this backup in the the lock directory
-echo "$BASHPID" > "${pid_file}"
-echo "$(date)" > "${start_date_file}"
+# store some useful info about this backup
+echo "start_date: $(date)" >> "${info_file}"
+echo "pid: ${BASHPID}" >> "${info_file}"
 
-echo "Backing up '${SOURCE}' to '${DEST}'..."
+# create a time-stamped directory for this backup
+backup_dir="${DEST}/backup-$(date '+%Y-%m-%dT%H:%M:%S')"
+
+# this link points to the most recent backup. it's used as a simple way to get
+# the location of the most recent backup, as well as a way to chain the most
+# recent backup to older ones via --link-dest. if this file doesn't already
+# exist, we just ignore it completely.
+current_link="${DEST}/current"
+
+# create the backup directory
+mkdir -p "${backup_dir}"
+
+# start backing things up!
+echo "Backing up '${SOURCE}' to '${backup_dir}'..."
 echo
 
-${RDIFF} \
+# use rsync and back everything up
+rsync \
+  --link-dest="${current_link}" \
+  \
+  --itemize-changes \
+  --human-readable \
+  --recursive \
+  --links \
+  --perms \
+  --times \
+  --group \
+  --owner \
+  --devices \
+  --specials \
+  --executability \
+  --one-file-system \
+  \
   --exclude '/home/*/.cache' \
   --include '/home' \
   --exclude '/tmp/*' \
@@ -65,17 +94,51 @@ ${RDIFF} \
   --exclude '/proc/*' \
   --exclude '/sys/*' \
   --exclude '/mnt/*/*' \
-  --exclude-special-files \
-  --exclude-other-filesystems \
-  --verbosity "${VERBOSITY}" \
-  "${SOURCE}" "${DEST}"
+  \
+  "${SOURCE}" "${backup_dir}"
+
+# re-write the 'current' link to point to the backup we just finished. we do
+# this only once the backup is complete since we only want to mark actual,
+# complete backups as the 'current' backup. if a backup is interrupted and we
+# fail to update the symlink, new backups will simply use the symlink to a
+# different backup instead of this one.
+echo
+echo "Marking '${backup_dir}' as the current backup..."
+rm "${current_link}" && ln -sf "${backup_dir}" "${current_link}"
+
+# remove old backups
+echo
+echo "Removing old backups from '${DEST}'"
+
+present="$(date +%s)"
+for old_backup_dir in ${DEST}/backup-*; do
+  # ignore non-directory files
+  if [ ! -d "${old_backup_dir}" ]; then
+    continue
+  fi
+
+  # pull the date (everything after the first '-') out of the directory name
+  dirname="$(basename ${old_backup_dir} | cut -d '-' -f 2-)"
+
+  # get the old date in UNIX time so we can calculate how many days old it is
+  past="$(date -d ${dirname} +%s)"
+
+  # bail if we couldn't get a date
+  if [[ "$?" -ne "0" ]]; then
+    echo "  ERROR: Couldn't parse date for '${old_backup_dir}'"
+    continue
+  fi
+
+  # if the old backup directory is older than the cutoff, remove the folder.
+  # since it will only contain hardlinks, it's safe to remove backups as the
+  # hard links will always just point to the physical file on disk.
+  if [[ "$(( (present - past) / (60 * 60 * 24) ))" -gt ${MAX_AGE_DAYS} ]]; then
+    echo "  Removing '${old_backup_dir}'..."
+    rm -rf "${old_backup_dir}"
+  fi
+done
+
+echo "Done removing old backups."
 
 echo
-echo "Purging old backups in '${DEST}'..."
-echo
-
-${RDIFF} \
-  --remove-older-than "${KEEP_FOR}" \
-  --force \
-  --verbosity "${VERBOSITY}" \
-  "${DEST}"
+echo "Backup complete!"
