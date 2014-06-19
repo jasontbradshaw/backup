@@ -70,8 +70,8 @@ mkdir -p "${backup_dir}"
 echo "Backing up '${SOURCE}' to '${backup_dir}'..."
 echo
 
-# use rsync and back everything up
-rsync \
+# use rsync and back everything up, telling it to be frugal with CPU and IO
+nice -n19 ionice -c3 rsync \
   --link-dest="${current_link}" \
   \
   --itemize-changes \
