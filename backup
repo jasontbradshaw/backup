@@ -4,6 +4,10 @@
 SOURCE='/'
 MAX_AGE_DAYS=365
 
+# the directory used to notify that a system backup is happening
+lock_dir="/tmp/backup.lock"
+info_file="${lock_dir}/info"
+
 # if the user requested the status of the backup, print the status and exit
 if [[ "${1}" == "-s" ]] || [[ "${1}" == "--status" ]]; then
   if [ -e "${lock_dir}" ]; then
@@ -26,10 +30,6 @@ fi
 
 # our only argument is the destination
 DEST="$(realpath -q ${1})"
-
-# the directory used to notify that a system backup is happening
-lock_dir="/tmp/backup.lock"
-info_file="${lock_dir}/info"
 
 # exit if we're not running as root, since we'll need it to run the backup
 if [[ ${EUID} -ne 0 ]]; then
