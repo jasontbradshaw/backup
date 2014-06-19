@@ -91,6 +91,7 @@ nice -n19 ionice -c3 rsync \
   --include '/home' \
   --exclude '/tmp/*' \
   --exclude '/var/tmp/*' \
+  --exclude '/var/log/journal/*' \
   --exclude '/proc/*' \
   --exclude '/sys/*' \
   --exclude '/mnt/*/*' \
