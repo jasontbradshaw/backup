@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # our only argument is the destination
-DEST="${1}"
+DEST="$(realpath ${1})"
 
 # configuration options
 SOURCE='/'
