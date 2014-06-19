@@ -104,7 +104,7 @@ nice -n19 ionice -c3 rsync \
 # different backup instead of this one.
 echo
 echo "Marking '${backup_dir}' as the current backup..."
-rm "${current_link}" && ln -sf "${backup_dir}" "${current_link}"
+rm -f "${current_link}" && ln -s "${backup_dir}" "${current_link}"
 
 # remove old backups
 echo
