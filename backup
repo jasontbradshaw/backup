@@ -104,14 +104,25 @@ nice -n19 ionice -c3 rsync \
   \
   "${SOURCE}" "${backup_dir}"
 
+rsync_exit_code="${?}"
+
 # re-write the 'current' link to point to the backup we just finished. we do
-# this only once the backup is complete since we only want to mark actual,
-# complete backups as the 'current' backup. if a backup is interrupted and we
-# fail to update the symlink, new backups will simply use the symlink to a
-# different backup instead of this one.
+# this only once the backup is complete _and_ successful since we only want to
+# mark actual, complete backups as the 'current' backup. if a backup is
+# interrupted and we fail to update the symlink, new backups will simply use the
+# existing symlink to the previous backup, leaving the incomplete folder
+# orphaned.
 echo
-echo "Marking '${backup_dir}' as the current backup..."
-rm -f "${current_link}" && ln -s "${backup_dir}" "${current_link}"
+if [ "${rsync_exit_code}" -eq "0" ]; then
+  echo "Marking '${backup_dir}' as the current backup..."
+  rm -f "${current_link}" && ln -s "${backup_dir}" "${current_link}"
+else
+  echo "Backup exited before completing, marking backup as interrupted..."
+
+  # mark the backup as incomplete by renaming its folder
+  interrupted_dir="$(dirname ${backup_dir})/interrupted-$(basename ${backup_dir})"
+  mv "${backup_dir}" "${interrupted_dir}"
+fi
 
 # remove old backups
 echo
