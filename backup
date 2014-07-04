@@ -89,13 +89,14 @@ nice -n19 ionice -c3 rsync \
   --devices \
   --specials \
   --executability \
-  --one-file-system \
   \
   --exclude '/home/*/.cache' \
+  --exclude '/home/*/.thumbnails' \
   --include '/home' \
   --exclude '/tmp/*' \
   --exclude '/var/tmp/*' \
   --exclude '/var/log/journal/*' \
+  --exclude '/dev/*' \
   --exclude '/proc/*' \
   --exclude '/sys/*' \
   --exclude '/mnt/*' \
