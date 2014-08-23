@@ -1,33 +1,32 @@
 backup
 ======
 
-My simple system backup script. Uses the magic of `rsync`'s `--link-dest` to do
-nice incremental backups.
+My simple backup script. Uses the magic of `rsync`'s `--link-dest` to do nice
+incremental backups.
 
 Description
 ----
 
-This script takes a single argument, a destination directory, and then runs an
-incremental backup on the entire system using `rsync`. The destination directory
-will contain many folders named `backup-{{DATE}}`, and a single symlink named
-`current` that points to the latest backup.
+This script takes a two arguments: a source directory, and a destination
+directory. It then runs an incremental backup of the source using `rsync`. The
+destination directory will contain many folders named `backup-{{DATE}}`, and a
+single symlink named `current` that points to the latest backup.
 
 When the backup is complete, the script then removes old backups on a rolling
-basis.
+basis, defaulting to 365 days.
 
-It excludes several unimportant system directories, and all external file systems
-_except_ `/home`.
+It excludes several unimportant system directories, and all external file
+systems _except_ `/home`, by default. This allows its simple use as a system
+backup script without further configuration.
 
-It should be run as a user that has read privileges on the entire file system.
-
-If another backup is currently running, it will refuse to run concurrently and
-will instead print out information about the currently-running backup.
+If another backup is happening to the same destination, it will refuse to run
+concurrently and will exit.
 
 Usage
 ----
 
 ```bash
-backup /mnt/backup/system-backup
+backup / /mnt/backup-drive/system-backups
 ```
 
 Notes
