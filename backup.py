@@ -3,12 +3,23 @@
 import argparse
 import atexit
 import json
+import logging
 import os
 import re
+import sys
 import shutil
 import time
 
 from sh import rsync
+
+# initialize logging
+logging.basicConfig(
+  name='rsync',
+  format='%(message)s',
+
+  # TODO: bump this down by default
+  level=logging.INFO,
+)
 
 # the format of backup directory timestamps. the time format is assumed to
 # always output a string of the same length!
@@ -26,10 +37,11 @@ INCOMPLETE_PREFIX = 'incomplete-'
 def get_config():
   '''Parse and return the current command-line arguments.'''
 
-  parser = argparse.ArgumentParser('backup',
-      description='''Make an incremental system backup to a directory. The
-      destination directory is filled with a sequence of folders that maintains
-      an incremental history of all backups made.''')
+  parser = argparse.ArgumentParser('backup', description='''
+      Make an incremental system backup to a directory. The destination
+      directory is filled with a sequence of folders that maintains an
+      incremental history of all backups made.
+  ''')
 
   # standardize a path to an absolute, normalized path
   norm = lambda path: os.path.abspath(os.path.normpath(path))
@@ -76,7 +88,7 @@ def parse_backup_time(path):
   '''
 
   try:
-    return time.strptime(path[-TIME_FORMAT_LENGTH:], TIME_FORMAT)
+    return time.mktime(time.strptime(path[-TIME_FORMAT_LENGTH:], TIME_FORMAT))
   except ValueError:
     # fail if we couldn't parse a timestamp
     return None
@@ -87,18 +99,39 @@ def remove_old_backups(dest, timestamp):
   timestamp.
   '''
 
+  logging.info("Removing backups older than %s...",
+      time.strftime(TIME_FORMAT, time.localtime(timestamp)))
+
+  # keep track of how many we've removed for logging purposes
+  removed = 0
   for path in os.listdir(dest):
     # normalize the path
-    path = os.path.abspath(os.path.normpath(path))
+    path = os.path.abspath(os.path.normpath(os.path.join(dest, path)))
     fname = os.path.basename(path)
+
+    logging.debug("  Checking '%s'", path)
 
     # only consider backup directories
     if os.path.isdir(path) and fname.startswith(BACKUP_PREFIX):
+      logging.debug("  '%s' was a dir and started with '%s'",
+          fname, BACKUP_PREFIX)
+
       backup_timestamp = parse_backup_time(path)
+      logging.debug("  Parsed timestamp %d", backup_timestamp)
 
       # remove the backup folder if we got a timestamp and it's too old
-      if backup_timestamp is not None and backup_timestamp - timestamp >= 0:
+      if backup_timestamp is None:
+        logging.error("  Failed to parse backup timestamp from '%s'", fname)
+      elif backup_timestamp - timestamp <= 0:
+        logging.info("  Removing '%s'", fname)
         shutil.rmtree(path)
+        removed += 1
+      else:
+        logging.debug("  Skipping '%s'", fname)
+
+      logging.debug('')
+
+  logging.info('Removed %d old backup%s.', removed, '' if removed == 1 else 's')
 
 def prune_incomplete_backups(dest):
   '''
@@ -106,33 +139,84 @@ def prune_incomplete_backups(dest):
   backup exists that is newer than they are.
   '''
 
-  newest_backup = None
-  files = [os.path.abspath(os.path.normpath(p)) for p in os.listdir(dest)]
+  newest_timestamp = None
+  files = [os.path.abspath(os.path.join(dest, p)) for p in os.listdir(dest)]
 
+  logging.info('Pruning incomplete backups...')
+
+  logging.debug('  Finding newest backup directory...')
   for path in files:
     fname = os.path.basename(path)
 
+    logging.debug("    Checking '%s'", path)
+
     # find the newest backup directory
     if os.path.isdir(path) and fname.startswith(BACKUP_PREFIX):
-      backup_timestamp = parse_backup_time(path)
+      fname = os.path.basename(path)
 
-      if newest_backup is None:
-        newest_backup = backup_timestamp
-      elif backup_timestamp is not None and backup_timestamp > newest_backup:
-        newest_backup = backup_timestamp
+      logging.debug("    '%s' was a dir and started with '%s'",
+          fname, BACKUP_PREFIX)
+
+      backup_timestamp = parse_backup_time(path)
+      if newest_timestamp is None:
+        logging.debug("    Setting initial newest directory to '%s'", fname)
+        newest_timestamp = backup_timestamp
+      elif backup_timestamp is None:
+        logging.error("    Failed to parse backup timestamp from '%s'", fname)
+      elif backup_timestamp > newest_timestamp:
+        logging.debug("    Found newer backup directory '%s'", fname)
+        newest_timestamp = backup_timestamp
+    else:
+      logging.debug("    Skipping '%s'", fname)
+
+    logging.debug("")
+
+  logging.info("  Newest backup directory time is %s",
+      time.strftime(TIME_FORMAT, time.localtime(newest_timestamp)))
+
+  logging.debug("")
 
   # if we found the newest backup, remove older incomplete backups
-  if newest_backup is not None:
+  incomplete = 0
+  pruned = 0
+  if newest_timestamp is not None:
+    logging.info("  Searching fo old incomplete backups...")
+
     for path in files:
       fname = os.path.basename(path)
 
+      logging.debug("    Checking '%s'", path)
+
       if os.path.isdir(path) and fname.startswith(INCOMPLETE_PREFIX):
-        incomplete_timestamp = parse_backup_time(path)
+        # track that we found an incomplete backup
+        incomplete += 1
+
+        logging.debug("    '%s' was a dir and started with '%s'",
+            fname, INCOMPLETE_PREFIX)
 
         # remove the incomplete folder if it's older than the newest backup
-        if (incomplete_timestamp is not None and
-            incomplete_timestamp - newest_backup >= 0):
+        incomplete_timestamp = parse_backup_time(path)
+        logging.debug("    Parsed timestamp %d", incomplete_timestamp)
+
+        if incomplete_timestamp is None:
+          logging.error("    Failed to parse backup timestamp from '%s'", fname)
+        elif incomplete_timestamp - newest_timestamp < 0:
+          logging.info("    Removing '%s'", fname)
+          pruned += 1
           shutil.rmtree(path)
+      else:
+        logging.debug("    Skipping '%s'", fname)
+
+      logging.debug('')
+  else:
+    # this shouldn't happen, as we should have at least the current backup
+    logging.error('  No backup directories found!')
+
+  logging.info('  Found %d incomplete backup%s',
+      incomplete, '' if incomplete == 1 else 's')
+
+  logging.info('Pruned %d incomplete backup%s',
+      pruned, '' if pruned == 1 else 's')
 
 def main():
   config = get_config()
@@ -143,7 +227,12 @@ def main():
   os.makedirs(dest, exist_ok=True)
 
   # lock it so only we can use it
-  unlock_dest = lock_dest(dest)
+  unlock_dest = None
+  try:
+    unlock_dest = lock_dest(dest)
+  except IOError as e:
+    logging.info('Backup already in progress, exiting.')
+    return 0
 
   # make sure we remove the lock on exit, now that we've acquired it
   atexit.register(unlock_dest)
@@ -156,6 +245,8 @@ def main():
       INCOMPLETE_PREFIX + BACKUP_PREFIX + backup_timestamp)
   complete_backup_dir = os.path.join(dest, BACKUP_PREFIX + backup_timestamp)
   current_link = os.path.join(dest, CURRENT_LINK_NAME)
+
+  logging.info("Backing up '%s' to '%s'...", src, dest)
 
   # start the backup
   rsync_result = rsync(
@@ -178,10 +269,14 @@ def main():
     # this does the incremental magic
     link_dest=current_link,
 
-    # makes rsync archive all changes
+    # prettify output a bit
     itemize_changes=True,
     human_readable=True,
+
+    # look through all subdirectories of the given one
     recursive=True,
+
+    # include all file types and duplicate all permissions
     links=True,
     perms=True,
     times=True,
@@ -190,19 +285,34 @@ def main():
     devices=True,
     specials=True,
     executability=True,
+
+    # log all rsync output through our logger
+    _out=logging.info,
+    _err=logging.error,
   )
 
   # bail if the backup didn't succeed
   if rsync_result.exit_code != 0:
+    logging.error('rsync process exited with code %d, backup failed!',
+        rsync_result.exit_code)
     return rsync_result.exit_code
+  else:
+    logging.info('Backup was successful')
 
   # mark the backup as 'complete'
+  logging.info('Marking the backup as complete...')
   os.rename(incomplete_backup_dir, complete_backup_dir)
 
   # remove any existing symlink and create a new one
-  if os.path.lexists(CURRENT_LINK_NAME):
-    os.path.unlink(CURRENT_LINK_NAME)
-  os.symlink(complete_backup_dir, CURRENT_LINK_NAME)
+  logging.info('Updating link to point at the current backup...')
+  current_link_path = os.path.join(dest, CURRENT_LINK_NAME)
+  if os.path.lexists(current_link_path):
+    logging.debug("Removing existing link at '%s'", current_link_path)
+    os.unlink(current_link_path)
+
+  # makes sure the link is relative, so we can move the backup folder without
+  # breaking the link.
+  os.symlink(os.path.basename(complete_backup_dir), current_link_path)
 
   # remove old backup folders
   keep_duration_seconds = 60 * 60 * 24 * config.days_to_keep
@@ -214,7 +324,5 @@ def main():
   return 0
 
 if __name__ == '__main__':
-  import sys
-
   # exit with whatever code main returns, defaulting to success
-  sys.exit(main() or 0)
+  sys.exit(main())
