@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
 import argparse
-import atexit
 import json
 import logging
 import os
 import re
-import sys
 import shutil
+import signal
+import sys
 import time
 
 from sh import rsync
@@ -234,8 +234,13 @@ def main():
     logging.info('Backup already in progress, exiting.')
     return 0
 
-  # make sure we remove the lock on exit, now that we've acquired it
-  atexit.register(unlock_dest)
+  # make sure we remove the lock on exit, now that we've acquired it. we catch
+  # these signals explicitly since it virtually guarantees that we'll remove the
+  # lock on exit, unless something catastrophic happens.
+  signal.signal(signal.SIGABRT, unlock_dest)
+  signal.signal(signal.SIGINT, unlock_dest)
+  signal.signal(signal.SIGSEGV, unlock_dest)
+  signal.signal(signal.SIGTERM, unlock_dest)
 
   # get a timestamp for the backup directory
   backup_timestamp = time.strftime(TIME_FORMAT)
