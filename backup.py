@@ -232,6 +232,10 @@ def main():
     unlock_dest = lock_dest(dest)
   except IOError as e:
     logging.info('Backup already in progress, exiting.')
+
+    # TODO: if the lock directory was created _before_ the system booted, remove
+    # it and continue anyway!
+
     return 0
 
   # make sure we remove the lock on exit, now that we've acquired it. we catch
