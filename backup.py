@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import atexit
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import sys
 import time
 
 from sh import rsync
+from sh import uptime
 
 # initialize logging
 logging.basicConfig(
@@ -59,6 +61,8 @@ def lock_dest(dest, name='backup.lock'):
   '''
   Create a lock directory in the destination directory. Raises an IOError if the
   lock could not be acquired, i.e. the destination directory is already locked.
+  If the directory was locked before system boot, the directory is re-locked for
+  this run, since the prior process couldn't still be running after a shutdown!
 
   Returns a function that removes the lock directory when called.
   '''
@@ -66,20 +70,58 @@ def lock_dest(dest, name='backup.lock'):
   # attempt to make a lock directory
   lock_dir = os.path.join(dest, name)
   info_path = os.path.join(lock_dir, 'info')
+
+  # see if a lock already exists by trying to read the file for it
+  try:
+    logging.debug('Looking for existing lock directory...')
+
+    data = None
+    with open(info_path, 'r') as info_file:
+      data = json.load(info_file)
+
+    # figure out when the system booted and when the directory was locked
+    boot_time = time.mktime(
+        time.strptime(uptime(since=True).strip(), '%Y-%m-%d %H:%M:%S'))
+    lock_time = time.mktime(time.strptime(data['start_time'], TIME_FORMAT))
+
+    # remove the lock directory if it was created before the system booted,
+    # since that process couldn't possibly still be running.
+    if boot_time > lock_time:
+      logging.info('Removing old lock directory (locked on %s, booted on %s)...',
+          time.strftime(TIME_FORMAT, time.localtime(lock_time)),
+          time.strftime(TIME_FORMAT, time.localtime(boot_time)))
+
+      shutil.rmtree(lock_dir)
+    else:
+      logging.debug('Lock file exists and is still valid (locked on %s)',
+          time.strftime(TIME_FORMAT, time.localtime(lock_time)))
+
+  except FileNotFoundError:
+    # do nothing since there was presumably no existing lock directory
+    logging.debug('No old lock directory found')
+    pass
+
   try:
     os.mkdir(lock_dir)
 
-    # write some useful info to our file, so others can see our status
+    # write some useful info to our file, so others can see our status while
+    # we're running and so this program can determine if the lock has "expired",
+    # i.e. the system rebooted while the directory was still locked.
     with open(info_path, 'w') as info_file:
       json.dump({
         'pid': os.getpid(),
-        'start_time': int(time.time()),
+        'start_time': time.strftime(TIME_FORMAT),
       }, info_file, indent='  ', sort_keys=True)
   except FileExistsError as e:
     raise IOError("Could not acquire lock in '" + dest + "'")
 
   # return a function that will remove the lock directory when called
-  return lambda: shutil.rmtree(lock_dir)
+  # TODO: there's probably a race condition in here somewhere... fix it!
+  return lambda: (
+    os.path.exists(info_path) and
+    os.path.exists(lock_dir) and
+    shutil.rmtree(lock_dir)
+  )
 
 def parse_backup_time(path):
   '''
@@ -232,19 +274,21 @@ def main():
     unlock_dest = lock_dest(dest)
   except IOError as e:
     logging.info('Backup already in progress, exiting.')
-
-    # TODO: if the lock directory was created _before_ the system booted, remove
-    # it and continue anyway!
-
     return 0
+
+  # remove the lock when exiting under normal circumstances
+  atexit.register(unlock_dest)
 
   # make sure we remove the lock on exit, now that we've acquired it. we catch
   # these signals explicitly since it virtually guarantees that we'll remove the
-  # lock on exit, unless something catastrophic happens.
-  signal.signal(signal.SIGABRT, unlock_dest)
-  signal.signal(signal.SIGINT, unlock_dest)
-  signal.signal(signal.SIGSEGV, unlock_dest)
-  signal.signal(signal.SIGTERM, unlock_dest)
+  # lock on exit, unless something catastrophic happens. we have to wrap the
+  # function since handler functions must take two arguments, otherwise they
+  # error.
+  unlock_dest_handler = lambda a, b: unlock_dest()
+  signal.signal(signal.SIGABRT, unlock_dest_handler)
+  signal.signal(signal.SIGINT, unlock_dest_handler)
+  signal.signal(signal.SIGSEGV, unlock_dest_handler)
+  signal.signal(signal.SIGTERM, unlock_dest_handler)
 
   # get a timestamp for the backup directory
   backup_timestamp = time.strftime(TIME_FORMAT)
