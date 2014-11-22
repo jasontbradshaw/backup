@@ -222,7 +222,7 @@ def prune_incomplete_backups(dest):
   incomplete = 0
   pruned = 0
   if newest_timestamp is not None:
-    logging.info("  Searching fo old incomplete backups...")
+    logging.info("  Searching for old incomplete backups...")
 
     for path in files:
       fname = os.path.basename(path)
