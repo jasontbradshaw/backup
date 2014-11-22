@@ -303,15 +303,25 @@ def main():
 
   # start the backup
   rsync_result = rsync(
-    '--exclude', '/home/*/.cache',
-    '--exclude', '/home/*/.thumbnails',
-    '--exclude', '/tmp/*',
-    '--exclude', '/var/tmp/*',
-    '--exclude', '/var/log/journal/*',
     '--exclude', '/dev/*',
-    '--exclude', '/proc/*',
-    '--exclude', '/sys/*',
+    '--exclude', '/dev/*',
+    '--exclude', '/home/*/.cache',
+    '--exclude', '/home/*/.config/google-chrome-*/Default/File System/*',
+    '--exclude', '/home/*/.config/google-chrome-*/Default/GPUCache/*',
+    '--exclude', '/home/*/.dropbox/logs/*',
+    '--exclude', '/home/*/.local/share/Trash',
+    '--exclude', '/home/*/.mozilla/firefox/*/Cache',
+    '--exclude', '/home/*/.thumbnails',
     '--exclude', '/mnt/*',
+    '--exclude', '/proc/*',
+    '--exclude', '/run/*',
+    '--exclude', '/sys/*',
+    '--exclude', '/tmp/*',
+    '--exclude', '/var/lock/*',
+    '--exclude', '/var/log/journal/*',
+    '--exclude', '/var/run/*',
+    '--exclude', '/var/tmp/*',
+
     '--exclude', dest,
 
     '--include', '/home',
