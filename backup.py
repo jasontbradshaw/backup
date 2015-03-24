@@ -16,7 +16,6 @@ from sh import uptime
 
 # initialize logging
 logging.basicConfig(
-  name='rsync',
   format='%(message)s',
 
   # TODO: bump this down by default
